@@ -1,7 +1,7 @@
 let val;
-// await fetch("/symbols").then((res) => res.text())
-//     .then((text) => {
-//         val = JSON.parse(JSON.parse(text));
-//     });
+await fetch("api/symbols").then((res) => res.text())
+    .then((text) => {
+        val = JSON.parse(text);
+    });
 
-export const SymbolsData = ["a"];
+export const SymbolsData = val;

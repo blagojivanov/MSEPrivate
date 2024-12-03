@@ -12,12 +12,12 @@ async function fnd(option1, option2) {
     } else if (option2 === "1 Year") {
         adder = "y";
     }
-    //
-    // await fetch(`/price/${option1}/${adder}`)
-    //     .then((res) => res.text())
-    //     .then((text) => {
-    //         val = JSON.parse(JSON.parse(text));
-    //     });
+
+    await fetch(`api/price/${option1}/${adder}`)
+        .then((res) => res.text())
+        .then((text) => {
+            val = JSON.parse(text);
+        });
 
     return val;
 }
@@ -131,11 +131,20 @@ const HeroSection = () => {
 
     const updateState = (CryptoDataVal) => {
         const newState = {...state};
-        newState.series[0].data = CryptoDataVal.map((obj) => obj.close.toFixed(5));
+
+        const validData = CryptoDataVal.filter(obj => obj.close !== undefined && obj.close !== null && !isNaN(obj.close) && obj.time !== undefined);
+
+        if (validData.length === 0) {
+            console.error("No valid data available for chart.");
+            return; // Early return if no valid data
+        }
+
+        // Set the series data
+        newState.series[0].data = validData.map((obj) => parseFloat(obj.close));
 
         // Store date strings for tooltip use
-        const formattedDates = CryptoDataVal.map((obj) => {
-            const dateObject = new Date(obj.time);
+        const formattedDates = validData.map((obj) => {
+            const dateObject = new Date(obj.time * 1000); // Convert timestamp to milliseconds
             return dateObject.toLocaleDateString(undefined, {
                 year: "numeric",
                 month: "short",
@@ -143,14 +152,18 @@ const HeroSection = () => {
             });
         });
 
-        newState.options.xaxis.categories = formattedDates; // Still needed for internal mapping
+        // Log the series data and formatted dates
+        console.log("Series Data:", newState.series[0].data);
+        console.log("Formatted Dates:", formattedDates);
 
-        // Hide x-axis labels
+        newState.options.xaxis.categories = validData.map((obj) => obj.time);
+
+        // Ensure x-axis categories are set correctly
         newState.options.xaxis.labels = {
             show: false,
         };
 
-        // Customize tooltip to show formatted date
+        // Update tooltip configuration
         newState.options.tooltip = {
             theme: "dark",
             style: {
@@ -162,9 +175,12 @@ const HeroSection = () => {
                 },
             },
             y: {
-                formatter: (value) => `$${value}`,
+                formatter: (value) => `${value} мкд.`,
             },
         };
+
+        // Log the final state before setting it
+        console.log("Final Chart State:", newState);
 
         setState(newState);
     };
@@ -172,17 +188,18 @@ const HeroSection = () => {
 
     // Fetch data for a random coin and 1 Year on page load
     useEffect(() => {
-        const randomCrypto = SymbolsData[Math.floor(Math.random() * SymbolsData.length)].sym;
+        const randomCrypto = SymbolsData[Math.floor(Math.random() * SymbolsData.length)];
         setSelectedOption1(randomCrypto);
 
         // Fetch data
-        // const fetchData = async () => {
-        //     const data = await fnd(randomCrypto, "1 Year");
-        //     updateState(data);
-        //     setKey((key) => key + 1);
-        // };
+        const fetchData = async () => {
+            const data = await fnd(randomCrypto, "1 Year");
+            updateState(data);
+            // updateState(data);
+            setKey((key) => key + 1);
+        };
 
-        // fetchData();
+        fetchData();
     }, []);
 
     const handleOption1Change = (event) => {
@@ -194,9 +211,9 @@ const HeroSection = () => {
     };
 
     const handleSaveClick = async () => {
-        // const prom = await fnd(selectedOption1, selectedOption2);
-        // updateState(prom);
-        // setKey((key) => key + 1);
+        const prom = await fnd(selectedOption1, selectedOption2);
+        updateState(prom);
+        setKey((key) => key + 1);
     };
 
     return (
@@ -215,8 +232,8 @@ const HeroSection = () => {
                                 >
                                     <option value="">Choose a cryptocurrency</option>
                                     {SymbolsData.map((crypto_sym) => (
-                                        <option key={crypto_sym.sym} value={crypto_sym.sym}>
-                                            {crypto_sym.name}
+                                        <option key={crypto_sym} value={crypto_sym}>
+                                            {crypto_sym}
                                         </option>
                                     ))}
                                 </select>
