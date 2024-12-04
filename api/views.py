@@ -3,7 +3,8 @@ import os
 import sqlite3
 import time
 import pandas as pd
-
+import numpy as np
+import itertools
 from django.http import HttpResponse
 from django.shortcuts import render
 from rest_framework.decorators import api_view
@@ -20,11 +21,12 @@ def update(request):
     end_time = time.time()
     return HttpResponse(f"Data processing completed in {end_time - start_time} seconds")
 
+
 def price(request, option1, adder):
     conn = sqlite3.connect("./databases/final_stock_data.db")
     curs = conn.cursor()
 
-    curs.execute("SELECT * FROM stock_prices WHERE issuer = ? LIMIT 300", (option1,))
+    curs.execute("SELECT * FROM stock_prices WHERE issuer = ?", (option1,))
     data = curs.fetchall()
 
     conn.close()
@@ -47,10 +49,25 @@ def price(request, option1, adder):
 
     df2 = df2.dropna(subset=['close', 'time'])
     df2 = df2.sort_values(by=['time'])
+    if adder == "y":
+        df2 = df2.tail(min(len(df2), 365))
+    elif adder == "m":
+        df2 = df2.tail(min(len(df2), 30))
+    elif adder == "w":
+        df2 = df2.tail(min(len(df2), 7))
     df2 = df2.to_json(orient="records")
 
     return HttpResponse(df2)
 
 
 def symbols(request):
-    return HttpResponse(json.dumps(fetch_issuers()))
+    conn = sqlite3.connect("./databases/final_stock_data.db")
+    curs = conn.cursor()
+
+    curs.execute("SELECT * FROM tickers")
+    data = curs.fetchall()
+    conn.close()
+
+    flattened_list = [item for sublist in data for item in sublist]
+
+    return HttpResponse(json.dumps(flattened_list))
