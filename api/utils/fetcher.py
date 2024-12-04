@@ -1,51 +1,60 @@
 import os
-
 import requests
 from bs4 import BeautifulSoup
 import sqlite3
 from datetime import datetime
-from multiprocessing import Pool, Manager
+from multiprocessing import Pool, Manager, Lock
 import time
+
+
+dblock = Lock()
 
 
 # Филтер 1: Функција за преземање на издавачите
 def fetch_issuers():
-    url = 'https://www.mse.mk/mk/stats/symbolhistory/ALKB'  # Се користи еден издавач за да се превземат сите други
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    issuers = []
-    for option in soup.select('select#Code option'):
-        issuer_code = option['value']
-        if not any(char.isdigit() for char in issuer_code):  # Не се земаат кодовите со цифри во нив затоа што тоа се обврзници
-            issuers.append(issuer_code)
+    with dblock:
+        connection = sqlite3.connect("./databases/final_stock_data.db")
+        cursor = connection.cursor()
+        url = 'https://www.mse.mk/mk/stats/symbolhistory/ALKB'  # Се користи еден издавач за да се превземат сите други
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        issuers = []
+        for option in soup.select('select#Code option'):
+            issuer_code = option['value']
+            if not any(char.isdigit() for char in issuer_code):  # Не се земаат кодовите со цифри во нив затоа што тоа се обврзници
+                issuers.append(issuer_code)
+                cursor.execute("INSERT INTO tickers (ID) VALUES (?)", (issuer_code,))
+        connection.commit()
+        connection.close()
     return issuers
 
 
 # Филтер 2: Функција за проверка на последен датум
 def check_last_date(issuer, db_name):
-    conn = sqlite3.connect(db_name)
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS stock_prices (
-                        issuer TEXT,
-                        date TEXT,
-                        cena_posledna TEXT,
-                        mak TEXT,
-                        min TEXT,
-                        average TEXT,
-                        percentChange TEXT,
-                        kolichina TEXT,
-                        prometbest TEXT,
-                        vkupenPromet TEXT,
-                        PRIMARY KEY (issuer, date));''')  # Доколку не постои табелата за цените, се креира таква табела
-    cursor.execute('''SELECT MAX(date(substr(date, 7, 4) || '-' || substr(date, 4, 2) || '-' || substr(date, 1, 2)))
-        FROM stock_prices
-        WHERE issuer = ?;
-        ''', (issuer,))
-    # Форматот на датумите кој ни потребен е дд.мм.гггг, a SQLite3 ги гледа како стрингови и при обичен MAX враќа грешен резултат.
-    # Затоа се реформатира датумот, па потоа се извршува MAX прашалникот. Податоците во базата сеуште го имаат форматот дд.мм.гггг
-    result = cursor.fetchone()
-    last_date = result[0] if result[0] else '2013.01.01'
-    conn.close()
+    with dblock:
+        conn = sqlite3.connect(db_name)
+        cursor = conn.cursor()
+        cursor.execute('''CREATE TABLE IF NOT EXISTS stock_prices (
+                            issuer TEXT,
+                            date TEXT,
+                            cena_posledna TEXT,
+                            mak TEXT,
+                            min TEXT,
+                            average TEXT,
+                            percentChange TEXT,
+                            kolichina TEXT,
+                            prometbest TEXT,
+                            vkupenPromet TEXT,
+                            PRIMARY KEY (issuer, date));''')  # Доколку не постои табелата за цените, се креира таква табела
+        cursor.execute('''SELECT MAX(date(substr(date, 7, 4) || '-' || substr(date, 4, 2) || '-' || substr(date, 1, 2)))
+            FROM stock_prices
+            WHERE issuer = ?;
+            ''', (issuer,))
+        # Форматот на датумите кој ни потребен е дд.мм.гггг, a SQLite3 ги гледа како стрингови и при обичен MAX враќа грешен резултат.
+        # Затоа се реформатира датумот, па потоа се извршува MAX прашалникот. Податоците во базата сеуште го имаат форматот дд.мм.гггг
+        result = cursor.fetchone()
+        last_date = result[0] if result[0] else '2013.01.01'
+        conn.close()
     return last_date
 
 
@@ -99,15 +108,16 @@ def fetch_missing_data(issuer, last_date):
 
 # Функција за зачувување на податоците во база
 def save_data_to_db(data, issuer, db_name):
-    conn = sqlite3.connect(db_name)
-    cursor = conn.cursor()
+    with dblock:
+        conn = sqlite3.connect(db_name)
+        cursor = conn.cursor()
 
-    rows_to_insert = [(issuer, *row) for row in data]
+        rows_to_insert = [(issuer, *row) for row in data]
 
-    cursor.executemany('''INSERT OR IGNORE INTO stock_prices (issuer, date, cena_posledna, mak, min, average, percentChange, kolichina, prometbest, vkupenPromet)
-                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', rows_to_insert)
-    conn.commit()
-    conn.close()
+        cursor.executemany('''INSERT OR IGNORE INTO stock_prices (issuer, date, cena_posledna, mak, min, average, percentChange, kolichina, prometbest, vkupenPromet)
+                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', rows_to_insert)
+        conn.commit()
+        conn.close()
 
 
 # Функција каде се користат Филтер 2 и Филтер 3
@@ -125,36 +135,37 @@ def split_issuers(issuers, n):
 
 # Функција која ги спојува сите бази на податоци во една
 def merge_databases(db_names, final_db_name):
-    final_conn = sqlite3.connect(final_db_name)
-    final_cursor = final_conn.cursor()
+    with dblock:
+        final_conn = sqlite3.connect(final_db_name)
+        final_cursor = final_conn.cursor()
 
-    final_cursor.execute('''CREATE TABLE IF NOT EXISTS stock_prices (
-                            issuer TEXT,
-                            date TEXT,
-                            cena_posledna TEXT,
-                            mak TEXT,
-                            min TEXT,
-                            average TEXT,
-                            percentChange TEXT,
-                            kolichina TEXT,
-                            prometbest TEXT,
-                            vkupenPromet TEXT,
-                            PRIMARY KEY (issuer, date));''')
+        final_cursor.execute('''CREATE TABLE IF NOT EXISTS stock_prices (
+                                issuer TEXT,
+                                date TEXT,
+                                cena_posledna TEXT,
+                                mak TEXT,
+                                min TEXT,
+                                average TEXT,
+                                percentChange TEXT,
+                                kolichina TEXT,
+                                prometbest TEXT,
+                                vkupenPromet TEXT,
+                                PRIMARY KEY (issuer, date));''')
 
-    for db_name in db_names:
-        temp_conn = sqlite3.connect(db_name)
-        temp_cursor = temp_conn.cursor()
+        for db_name in db_names:
+            temp_conn = sqlite3.connect(db_name)
+            temp_cursor = temp_conn.cursor()
 
-        temp_cursor.execute('''SELECT * FROM stock_prices''')
-        rows = temp_cursor.fetchall()
+            temp_cursor.execute('''SELECT * FROM stock_prices''')
+            rows = temp_cursor.fetchall()
 
-        final_cursor.executemany('''INSERT OR IGNORE INTO stock_prices (issuer, date, cena_posledna, mak, min, average, percentChange, kolichina, prometbest, vkupenPromet)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', rows)
+            final_cursor.executemany('''INSERT OR IGNORE INTO stock_prices (issuer, date, cena_posledna, mak, min, average, percentChange, kolichina, prometbest, vkupenPromet)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', rows)
 
-        temp_conn.close()
+            temp_conn.close()
 
-    final_conn.commit()
-    final_conn.close()
+        final_conn.commit()
+        final_conn.close()
 
 
 # Имлементација на Pipe and Filter

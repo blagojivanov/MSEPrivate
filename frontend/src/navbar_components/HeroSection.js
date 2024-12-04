@@ -6,14 +6,8 @@ import "./HeroSection.css";
 
 async function fnd(option1, option2) {
     let val;
-    let adder = "m";
-    if (option2 === "1 Week") {
-        adder = "w";
-    } else if (option2 === "1 Year") {
-        adder = "y";
-    }
 
-    await fetch(`api/price/${option1}/${adder}`)
+    await fetch(`api/price/${option1}/${option2}`)
         .then((res) => res.text())
         .then((text) => {
             val = JSON.parse(text);
@@ -193,7 +187,7 @@ const HeroSection = () => {
 
         // Fetch data
         const fetchData = async () => {
-            const data = await fnd(randomCrypto, "1 Year");
+            const data = await fnd(randomCrypto, "y");
             updateState(data);
             // updateState(data);
             setKey((key) => key + 1);
@@ -242,9 +236,10 @@ const HeroSection = () => {
                                     value={selectedOption2}
                                     onChange={handleOption2Change}
                                 >
-                                    <option value="1 Year">1 Year</option>
-                                    <option value="1 Month">1 Month</option>
-                                    <option value="1 Week">1 Week</option>
+                                    <option value="at">All time</option>
+                                    <option value="y">1 Year</option>
+                                    <option value="m">1 Month</option>
+                                    <option value="w">1 Week</option>
                                 </select>
                                 <button className="crypto_button" onClick={handleSaveClick}>
                                     Save
